@@ -1,38 +1,42 @@
-//
-// crimeZones.ts
-
-export const generateFakeZones = () => {
-  const baseLat = 17.421; // JNTUH latitude
-  const baseLng = 78.565; // JNTUH longitude
-  const riskLevels = ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"];
-  const zones = [];
-
-  for (let i = 0; i < 10; i++) {
-    const latOffset = (Math.random() - 0.5) * 0.01;
-    const lngOffset = (Math.random() - 0.5) * 0.01;
-    zones.push({
-      id: `zone${i + 1}`,
-      risk: riskLevels[Math.floor(Math.random() * riskLevels.length)],
-      coordinates: [
-        { latitude: baseLat + latOffset, longitude: baseLng + lngOffset },
-        {
-          latitude: baseLat + latOffset + 0.001,
-          longitude: baseLng + lngOffset,
-        },
-        {
-          latitude: baseLat + latOffset + 0.001,
-          longitude: baseLng + lngOffset + 0.001,
-        },
-        {
-          latitude: baseLat + latOffset,
-          longitude: baseLng + lngOffset + 0.001,
-        },
-      ],
-    });
-  }
-
-  return zones;
-};
-
-// Generate zones by default
-export const crimeZones = generateFakeZones();
+export const crimeZones = [
+  {
+    id: "zone1",
+    risk: "VERY_HIGH",
+    coordinates: [
+      { latitude: 17.43, longitude: 78.56 },
+      { latitude: 17.435, longitude: 78.575 },
+      { latitude: 17.42, longitude: 78.58 },
+      { latitude: 17.415, longitude: 78.565 },
+    ],
+  },
+  {
+    id: "zone2",
+    risk: "HIGH",
+    coordinates: [
+      { latitude: 17.415, longitude: 78.565 },
+      { latitude: 17.42, longitude: 78.58 },
+      { latitude: 17.405, longitude: 78.585 },
+      { latitude: 17.4, longitude: 78.57 },
+    ],
+  },
+  {
+    id: "zone3",
+    risk: "MEDIUM",
+    coordinates: [
+      { latitude: 17.435, longitude: 78.575 },
+      { latitude: 17.44, longitude: 78.59 },
+      { latitude: 17.425, longitude: 78.595 },
+      { latitude: 17.42, longitude: 78.58 },
+    ],
+  },
+  {
+    id: "zone4",
+    risk: "LOW",
+    coordinates: [
+      { latitude: 17.4, longitude: 78.57 },
+      { latitude: 17.405, longitude: 78.585 },
+      { latitude: 17.39, longitude: 78.59 },
+      { latitude: 17.385, longitude: 78.575 },
+    ],
+  },
+];

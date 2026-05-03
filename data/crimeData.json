@@ -1,0 +1,118 @@
+[
+  {
+    "City": "Agra",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Ahmedabad",
+    "Safety Zone": "Red"
+  },
+  {
+    "City": "Bangalore",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Bhopal",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Chennai",
+    "Safety Zone": "Red"
+  },
+  {
+    "City": "Delhi",
+    "Safety Zone": "Red"
+  },
+  {
+    "City": "Faridabad",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Ghaziabad",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Hyderabad",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Indore",
+    "Safety Zone": "Red"
+  },
+  {
+    "City": "Jaipur",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Kalyan",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Kanpur",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Kolkata",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Lucknow",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Ludhiana",
+    "Safety Zone": "Red"
+  },
+  {
+    "City": "Meerut",
+    "Safety Zone": "Red"
+  },
+  {
+    "City": "Mumbai",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Nagpur",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Nashik",
+    "Safety Zone": "Red"
+  },
+  {
+    "City": "Patna",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Pune",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Rajkot",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Srinagar",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Surat",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Thane",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Varanasi",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Vasai",
+    "Safety Zone": "Orange"
+  },
+  {
+    "City": "Visakhapatnam",
+    "Safety Zone": "Orange"
+  }
+]

@@ -3,6 +3,7 @@ import * as Speech from "expo-speech";
 import { isPointInPolygon } from "geolib";
 import React, { useEffect, useRef, useState } from "react";
 import {
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -10,8 +11,10 @@ import {
   View,
 } from "react-native";
 import MapView, { Marker, Polygon, Polyline } from "react-native-maps";
+import crimeData from "../../data/crimeData.json";
 import { crimeZones } from "../../data/crimeZones";
-
+import { generateHeatmapPoints } from "../../data/heatmapData";
+import regions from "../../data/indiaRegions.json";
 type LatLng = {
   latitude: number;
   longitude: number;
@@ -23,7 +26,7 @@ type CrimeZone = {
   coordinates: LatLng[];
 };
 
-// 🔍 Detect risk at a point
+// 🔍 Detect risk
 const getRiskAtLocation = (point: LatLng, zones: CrimeZone[]) => {
   for (let zone of zones) {
     if (isPointInPolygon(point, zone.coordinates)) {
@@ -33,19 +36,55 @@ const getRiskAtLocation = (point: LatLng, zones: CrimeZone[]) => {
   return "LOW";
 };
 
-// 🎨 Risk → Color
+// 🚨 Route risk detection
+const doesRoutePassHighRisk = (coords: LatLng[], zones: CrimeZone[]) => {
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+
+    for (let t = 0; t <= 1; t += 0.1) {
+      const point = {
+        latitude: p1.latitude + (p2.latitude - p1.latitude) * t,
+        longitude: p1.longitude + (p2.longitude - p1.longitude) * t,
+      };
+
+      const risk = getRiskAtLocation(point, zones);
+      if (risk === "HIGH" || risk === "VERY_HIGH") return true;
+    }
+  }
+  return false;
+};
+
+// 🛣 Waypoints
+const getSafeWaypoints = (start: LatLng, end: LatLng): LatLng[] => {
+  const midLat = (start.latitude + end.latitude) / 2;
+  const midLng = (start.longitude + end.longitude) / 2;
+
+  return [
+    { latitude: midLat + 0.05, longitude: midLng },
+    { latitude: midLat - 0.05, longitude: midLng },
+    { latitude: midLat, longitude: midLng + 0.05 },
+    { latitude: midLat, longitude: midLng - 0.05 },
+
+    // diagonals (very important)
+    { latitude: midLat + 0.05, longitude: midLng + 0.05 },
+    { latitude: midLat - 0.05, longitude: midLng - 0.05 },
+  ];
+};
+
+// 🎨 Colors
 const riskColor = (risk: string) => {
   switch (risk) {
     case "LOW":
-      return "rgba(0,255,0,0.35)";
+      return "rgba(0,200,0,0.25)";
     case "MEDIUM":
-      return "rgba(255,255,0,0.35)";
+      return "rgba(255,255,0,0.25)";
     case "HIGH":
-      return "rgba(255,165,0,0.35)";
+      return "rgba(255,140,0,0.30)";
     case "VERY_HIGH":
       return "rgba(255,0,0,0.35)";
     default:
-      return "rgba(200,200,200,0.2)";
+      return "transparent";
   }
 };
 
@@ -57,25 +96,32 @@ export default function HomeScreen() {
   const [distance, setDistance] = useState<string | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const [suggestions, setSuggestions] = useState<any[]>([]);
   const [zoneRisk, setZoneRisk] = useState<string>("LOW");
+  const [avoidRisk, setAvoidRisk] = useState(true);
+  const [autoCenter, setAutoCenter] = useState(true);
 
+  const debounceRef = useRef<any>(null);
+  const mapRef = useRef<MapView | null>(null);
   const lastRoutedLocation = useRef<LatLng | null>(null);
   const lastSpokenRisk = useRef<string | null>(null);
-  const locationSubscription = useRef<Location.LocationSubscription | null>(
-    null,
-  );
+  const subRef = useRef<Location.LocationSubscription | null>(null);
 
-  // 📍 LIVE LOCATION + RISK DETECTION
+  const [heatmapPoints, setHeatmapPoints] = useState<any[]>([]);
+  //const [heatmapPoints, setHeatmapPoints] = useState<any[]>([]);
+  // 📍 LOCATION TRACKING
+  useEffect(() => {
+    const pts = generateHeatmapPoints(crimeData);
+    console.log("Heatmap points:", pts.length); // debug
+    setHeatmapPoints(pts);
+  }, []);
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") return;
 
-      locationSubscription.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          distanceInterval: 10,
-        },
+      subRef.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, distanceInterval: 10 },
         (loc) => {
           const current = {
             latitude: loc.coords.latitude,
@@ -84,105 +130,149 @@ export default function HomeScreen() {
 
           setLocation(current);
 
-          // 🚨 Risk detection
-          const currentRisk = getRiskAtLocation(current, crimeZones);
-          setZoneRisk(currentRisk);
-
-          // 🔊 Speak only when risk changes
-          if (currentRisk !== "LOW" && lastSpokenRisk.current !== currentRisk) {
-            Speech.speak(`Warning! ${currentRisk} risk area`);
-            lastSpokenRisk.current = currentRisk;
+          if (autoCenter) {
+            mapRef.current?.animateToRegion({
+              ...current,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            });
           }
 
-          // Reset speech memory when safe
-          if (currentRisk === "LOW") {
-            lastSpokenRisk.current = null;
+          const risk = getRiskAtLocation(current, crimeZones);
+          setZoneRisk(risk);
+
+          if (risk !== "LOW" && lastSpokenRisk.current !== risk) {
+            Speech.stop();
+            setTimeout(() => {
+              Speech.speak(`Warning! ${risk} risk area`);
+            }, 300);
+            lastSpokenRisk.current = risk;
           }
 
-          // 🔁 Auto reroute
+          if (risk === "LOW") lastSpokenRisk.current = null;
+
           if (destination) {
             const prev = lastRoutedLocation.current;
-            if (
+
+            const movedEnough =
               !prev ||
-              Math.abs(prev.latitude - current.latitude) > 0.0002 ||
-              Math.abs(prev.longitude - current.longitude) > 0.0002
-            ) {
+              Math.abs(prev.latitude - current.latitude) > 0.0005 ||
+              Math.abs(prev.longitude - current.longitude) > 0.0005;
+
+            if (movedEnough) {
               lastRoutedLocation.current = current;
-              getRoute(current, destination);
+              getRoute(current, destination, avoidRisk);
             }
           }
         },
       );
     })();
 
-    // 🧹 Cleanup GPS listener
-    return () => {
-      locationSubscription.current?.remove();
-    };
-  }, [destination]);
+    return () => subRef.current?.remove();
+  }, [destination, avoidRisk, autoCenter]);
 
-  // 🛣 ROUTE + VOICE
-  const getRoute = async (start: LatLng, end: LatLng) => {
-    const url = `https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson&steps=true`;
+  // 🛣 ROUTING
+  const getRoute = async (start: LatLng, end: LatLng, avoid = true) => {
+    try {
+      const baseUrl = `https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson&steps=true`;
 
-    const res = await fetch(url);
-    const data = await res.json();
-    const route = data.routes[0];
+      let res = await fetch(baseUrl);
+      let data = await res.json();
+      if (!data.routes?.length) return;
 
-    const coords = route.geometry.coordinates.map(
-      ([lng, lat]: [number, number]) => ({
+      let route = data.routes[0];
+      let coords = route.geometry.coordinates.map(([lng, lat]: any) => ({
         latitude: lat,
         longitude: lng,
-      }),
-    );
+      }));
 
-    const step = route.legs[0].steps[0];
-    const text = `Turn ${step.maneuver.modifier || "straight"} onto ${
-      step.name || "road"
-    }`;
+      let finalRoute = route;
 
-    setInstruction(text);
-    Speech.speak(text);
+      if (avoid && doesRoutePassHighRisk(coords, crimeZones)) {
+        const waypoints = getSafeWaypoints(start, end);
 
-    setRouteCoords(coords);
-    setDistance((route.distance / 1000).toFixed(2));
-    setDuration(Math.ceil(route.duration / 60));
+        for (let wp of waypoints) {
+          const testUrl = `https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${wp.longitude},${wp.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson`;
+
+          const r = await fetch(testUrl);
+          const d = await r.json();
+          if (!d.routes?.length) continue;
+
+          const testCoords = d.routes[0].geometry.coordinates.map(
+            ([lng, lat]: any) => ({
+              latitude: lat,
+              longitude: lng,
+            }),
+          );
+
+          if (doesRoutePassHighRisk(testCoords, crimeZones)) {
+            console.log("❌ Route still unsafe");
+            continue; // skip this route
+          }
+
+          // ✅ SAFE ROUTE FOUND
+          finalRoute = d.routes[0];
+          coords = testCoords;
+          Speech.stop();
+          Speech.speak("Safer route selected");
+          break;
+        }
+      }
+
+      const step = finalRoute.legs[0]?.steps[0];
+
+      // ⚠ fallback if no safe route found
+      if (doesRoutePassHighRisk(coords, crimeZones)) {
+        console.log("⚠ No fully safe route found, using least risky route");
+      }
+      if (step) {
+        const text = `Turn ${step.maneuver.modifier || "straight"} onto ${step.name || "road"}`;
+        setInstruction(text);
+        Speech.stop();
+        Speech.speak(text);
+      }
+
+      setRouteCoords(coords);
+      setDistance((finalRoute.distance / 1000).toFixed(2));
+      setDuration(Math.ceil(finalRoute.duration / 60));
+    } catch (e) {
+      console.log("Routing error:", e);
+    }
   };
 
-  // 🔍 SEARCH
-  const searchPlace = async () => {
-    if (!location || !search.trim()) return;
+  // 🔍 SEARCH SUGGESTIONS
+  const fetchSuggestions = (text: string) => {
+    setSearch(text);
 
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-      search,
-    )}`;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "SafeNavigationApp/1.0",
-      },
-    });
+    debounceRef.current = setTimeout(async () => {
+      if (text.length < 3 || !location) return setSuggestions([]);
 
-    const data = await res.json();
-    if (!data.length) return alert("Place not found");
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}&limit=5`;
 
+      const res = await fetch(url, {
+        headers: { "User-Agent": "SafeNavigationApp/1.0" },
+      });
+
+      const data = await res.json();
+      setSuggestions(data);
+    }, 400);
+  };
+
+  const selectSuggestion = (item: any) => {
     const dest = {
-      latitude: parseFloat(data[0].lat),
-      longitude: parseFloat(data[0].lon),
+      latitude: parseFloat(item.lat),
+      longitude: parseFloat(item.lon),
     };
 
     setDestination(dest);
-    getRoute(location, dest);
-  };
-
-  // 👆 Map tap
-  const handleMapPress = (e: any) => {
+    setSearch(item.display_name);
+    setSuggestions([]);
     if (!location) return;
-    setDestination(e.nativeEvent.coordinate);
-    getRoute(location, e.nativeEvent.coordinate);
+    getRoute(location, dest, avoidRisk);
   };
 
-  // 🔁 RESET
   const reset = () => {
     setDestination(null);
     setRouteCoords([]);
@@ -190,6 +280,7 @@ export default function HomeScreen() {
     setDistance(null);
     setDuration(null);
     setSearch("");
+    setSuggestions([]);
     setZoneRisk("LOW");
     lastSpokenRisk.current = null;
     Speech.stop();
@@ -206,29 +297,106 @@ export default function HomeScreen() {
   return (
     <View style={{ flex: 1 }}>
       <MapView
+        ref={mapRef}
         style={{ flex: 1 }}
         showsUserLocation
-        onPress={handleMapPress}
-        region={{
-          // latitude: location.latitude,
-          // longitude: location.longitude,
-          // latitudeDelta: 0.02,
-          // longitudeDelta: 0.02,
-          latitude: 17.421, // JNTUH
-          longitude: 78.565,
-          latitudeDelta: 0.01, // smaller delta = closer zoom
+        onPress={(e) => {
+          const dest = e.nativeEvent.coordinate;
+          setDestination(dest);
+          getRoute(location, dest, avoidRisk);
+        }}
+        initialRegion={{
+          ...location,
+          latitudeDelta: 0.01,
           longitudeDelta: 0.01,
         }}
       >
-        {crimeZones.map((zone) => (
+        {/* {heatmapPoints.length > 0 && (
+          <Heatmap points={heatmapPoints} radius={50} opacity={0.7} />
+        )} */}
+        {/* 🔴 DEBUG: show crime zones */}
+        {crimeZones.map((zone, i) => (
           <Polygon
-            key={zone.id}
+            key={`zone-${i}`}
             coordinates={zone.coordinates}
-            fillColor={riskColor(zone.risk)}
-            strokeColor="rgba(0,0,0,0.5)" // make borders visible
-            strokeWidth={3}
+            fillColor="rgba(255,0,0,0.2)"
+            strokeColor="rgba(255,0,0,0.5)"
           />
         ))}
+        {regions.features.map((feature: any, index: number) => {
+          const coords = (() => {
+            const geom = feature.geometry;
+            if (!geom || !geom.coordinates) return [];
+
+            try {
+              if (geom.type === "Polygon") {
+                return geom.coordinates[0].map(([lng, lat]: number[]) => ({
+                  latitude: lat,
+                  longitude: lng,
+                }));
+              }
+
+              if (geom.type === "MultiPolygon") {
+                return (
+                  geom.coordinates[0]?.[0]?.map(([lng, lat]: number[]) => ({
+                    latitude: lat,
+                    longitude: lng,
+                  })) || []
+                );
+              }
+            } catch (e) {
+              console.log("Polygon parse error:", e);
+            }
+
+            return [];
+          })();
+          // match with your crime data
+          const cityName = feature.properties.name;
+
+          const cityData = crimeData.find((c) => {
+            const city = c.City.toLowerCase().trim();
+            const region = cityName.toLowerCase().trim();
+
+            return region.includes(city);
+          });
+
+          let risk: string | null = null;
+
+          if (cityData) {
+            switch (cityData["Safety Zone"]) {
+              case "Red":
+                risk = "VERY_HIGH";
+                break;
+              case "Orange":
+                risk = "HIGH";
+                break;
+              case "Yellow":
+                risk = "MEDIUM";
+                break;
+              default:
+                risk = "LOW";
+            }
+          }
+          if (!risk) return null;
+          if (!coords.length) return null;
+          console.log(
+            "Region:",
+            cityName,
+            "| Risk:",
+            risk,
+            "| Points:",
+            coords.length,
+          );
+
+          return (
+            <Polygon
+              key={index}
+              coordinates={coords}
+              fillColor={riskColor(risk)}
+              strokeColor="rgba(0,0,0,0.2)"
+            />
+          );
+        })}
 
         {destination && <Marker coordinate={destination} />}
 
@@ -241,18 +409,50 @@ export default function HomeScreen() {
         )}
       </MapView>
 
+      {/* Suggestions */}
+      {suggestions.length > 0 && (
+        <ScrollView style={styles.suggestionBox}>
+          {suggestions.map((item, i) => (
+            <TouchableOpacity key={i} onPress={() => selectSuggestion(item)}>
+              <Text style={styles.suggestionItem}>
+                {item.display_name.split(",")[0]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
       {/* Search */}
       <View style={styles.searchBox}>
         <TextInput
           placeholder="Search place"
           value={search}
-          onChangeText={setSearch}
+          onChangeText={fetchSuggestions}
           style={styles.input}
         />
-        <TouchableOpacity style={styles.searchBtn} onPress={searchPlace}>
+        <TouchableOpacity style={styles.searchBtn}>
           <Text style={{ color: "white" }}>Search</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Controls */}
+      <TouchableOpacity
+        style={styles.toggleBtn}
+        onPress={() => setAvoidRisk(!avoidRisk)}
+      >
+        <Text style={{ color: "white" }}>
+          {avoidRisk ? "Avoiding Risk ✅" : "Avoid Risk ❌"}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.autoBtn}
+        onPress={() => setAutoCenter(!autoCenter)}
+      >
+        <Text style={{ color: "white" }}>
+          {autoCenter ? "Auto Center ON" : "Auto Center OFF"}
+        </Text>
+      </TouchableOpacity>
 
       {/* Info */}
       {instruction && (
@@ -264,7 +464,7 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* Risk Banner */}
+      {/* Risk */}
       {zoneRisk !== "LOW" && (
         <View style={styles.warningBox}>
           <Text style={{ fontWeight: "bold" }}>⚠ {zoneRisk} RISK AREA</Text>
@@ -274,43 +474,71 @@ export default function HomeScreen() {
       {/* Reset */}
       {destination && (
         <TouchableOpacity style={styles.resetBtn} onPress={reset}>
-          <Text style={{ color: "white", fontWeight: "bold" }}>
-            Reset Navigation
-          </Text>
+          <Text style={{ color: "white" }}>Reset</Text>
         </TouchableOpacity>
       )}
     </View>
   );
 }
 
-// 🎨 Styles
 const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+
   searchBox: {
     position: "absolute",
-    top: 70,
+    top: 20,
     left: 10,
     right: 10,
     flexDirection: "row",
     backgroundColor: "white",
-    borderRadius: 10,
     padding: 6,
+    borderRadius: 10,
     elevation: 10,
   },
-  input: {
-    flex: 1,
-    paddingHorizontal: 10,
+
+  suggestionBox: {
+    position: "absolute",
+    top: 70,
+    left: 10,
+    right: 10,
+    backgroundColor: "white",
+    borderRadius: 10,
+    elevation: 10,
+    maxHeight: 200,
   },
+
+  suggestionItem: {
+    padding: 10,
+    borderBottomWidth: 0.5,
+  },
+
+  input: { flex: 1, paddingHorizontal: 10 },
+
   searchBtn: {
     backgroundColor: "#007AFF",
     paddingHorizontal: 15,
     justifyContent: "center",
     borderRadius: 8,
   },
+
+  toggleBtn: {
+    position: "absolute",
+    top: 80,
+    right: 10,
+    backgroundColor: "#333",
+    padding: 10,
+    borderRadius: 10,
+  },
+
+  autoBtn: {
+    position: "absolute",
+    top: 130,
+    right: 10,
+    backgroundColor: "#555",
+    padding: 10,
+    borderRadius: 10,
+  },
+
   infoBox: {
     position: "absolute",
     top: 110,
@@ -318,8 +546,8 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     padding: 12,
     borderRadius: 10,
-    elevation: 5,
   },
+
   warningBox: {
     position: "absolute",
     top: 160,
@@ -327,12 +555,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff3cd",
     padding: 10,
     borderRadius: 8,
-    elevation: 5,
   },
-  bold: {
-    fontWeight: "bold",
-    textAlign: "center",
-  },
+
+  bold: { fontWeight: "bold", textAlign: "center" },
+
   resetBtn: {
     position: "absolute",
     bottom: 30,
